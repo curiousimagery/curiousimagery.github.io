@@ -186,6 +186,13 @@
         <input type="range" id="fadeSlider" min="200" max="8000" step="100" value="2200">
         <span class="m-slider-val" id="fadeVal">2.2s</span>
       </div>
+      <div class="m-row">
+        <span class="m-label">scaling</span>
+        <div class="m-opts">
+          <button class="m-opt on" data-opt="scaling" data-val="fit">fit</button>
+          <button class="m-opt" data-opt="scaling" data-val="fill">fill</button>
+        </div>
+      </div>
     </div>
 
     <button class="m-panel-toggle" id="ctrlToggle">controls reference</button>
@@ -256,7 +263,7 @@ const S={
   gb:0,gs:0,gTap:-1,gTapT:0,
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
-  order:'sequential',transition:'crossfade',fadeMs:2200,
+  order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',
   qtTaps:[],qtW:1200,
   lumaGL:null,lumaActive:false,lumaRaf:null,
 };
@@ -284,11 +291,19 @@ function mkThumb(file){
     let done=false;
     function grab(){if(done)return;done=true;const c=document.createElement('canvas');const vw=v.videoWidth||320,vh=v.videoHeight||180;c.width=320;c.height=Math.round(320*vh/vw)||180;try{c.getContext('2d').drawImage(v,0,0,c.width,c.height);}catch(e){}v.pause();v.removeAttribute('src');v.load();resolve({thumb:c,url,dur:v.duration||0});}
     function fail(){if(done)return;done=true;const c=document.createElement('canvas');c.width=320;c.height=180;c.getContext('2d').fillStyle='#151515';c.getContext('2d').fillRect(0,0,320,180);v.pause();v.removeAttribute('src');v.load();resolve({thumb:c,url,dur:0});}
-    v.onloadeddata=()=>{try{v.currentTime=0.1;}catch(e){grab();}};
+    // Play first to prime decoding in PWA standalone mode, then seek
+    v.onloadeddata=()=>{
+      v.play().then(()=>{
+        try{v.currentTime=0.1;}catch(e){grab();}
+      }).catch(()=>{
+        // If play fails, try seeking directly
+        try{v.currentTime=0.1;}catch(e){grab();}
+      });
+    };
     v.onseeked=grab;
     v.oncanplay=()=>{if(!done)setTimeout(()=>{if(!done)grab();},500);};
     v.onerror=fail;
-    setTimeout(fail,3000);
+    setTimeout(fail,4000);
   });
 }
 
@@ -497,7 +512,8 @@ function menuClose(){menu.classList.remove('on');}
 el('mClose').onclick=menuClose;
 el('mAdd').onclick=()=>{menuClose();S.mode='setup';el('setup').classList.add('on');el('player').classList.remove('on');updateSetup();};
 el('mClear').onclick=()=>{S.banks.forEach(b=>{if(b)b.clips.forEach(c=>URL.revokeObjectURL(c.url));});S.banks=[];menuClose();el('player').classList.remove('on');el('grid').classList.remove('on');vA.pause();vA.removeAttribute('src');vA.load();vB.pause();vB.removeAttribute('src');vB.load();S.mode='setup';el('setup').classList.add('on');updateSetup();msg('all clips cleared');};
-menu.querySelectorAll('.m-opt').forEach(o=>{o.onclick=()=>{S[o.dataset.opt]=o.dataset.val;o.closest('.m-opts').querySelectorAll('.m-opt').forEach(s=>s.classList.toggle('on',s.dataset.val===o.dataset.val));};});
+menu.querySelectorAll('.m-opt').forEach(o=>{o.onclick=()=>{S[o.dataset.opt]=o.dataset.val;o.closest('.m-opts').querySelectorAll('.m-opt').forEach(s=>s.classList.toggle('on',s.dataset.val===o.dataset.val));if(o.dataset.opt==='scaling')applyScaling();};});
+function applyScaling(){const v=S.scaling==='fill'?'cover':'contain';vA.style.objectFit=v;vB.style.objectFit=v;lumaC.style.objectFit=v;}
 
 // slider
 const fadeSlider=el('fadeSlider'),fadeVal=el('fadeVal');
