@@ -159,7 +159,7 @@
 
 <div id="menu">
   <div class="menu-scroll">
-    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v8</span></div>
+    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v9</span></div>
 
     <button class="m-item" id="mAdd">add more media</button>
     <button class="m-item" id="mClear">clear all &amp; reset <span id="mClipCount" style="color:var(--dim);"></span></button>
@@ -233,6 +233,7 @@
         <div class="ctrl-row"><span class="ctrl-k">a button</span><span class="ctrl-v">play selected</span></div>
         <div class="ctrl-row"><span class="ctrl-k">b / start</span><span class="ctrl-v">toggle grid</span></div>
         <div class="ctrl-row"><span class="ctrl-k">l / r shoulder</span><span class="ctrl-v">switch bank</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">b + d-pad ← →</span><span class="ctrl-v">switch bank (no shoulders)</span></div>
       </div>
     </div>
 
@@ -276,7 +277,7 @@ const S={
   tx:0,ty:0,tt:0,
   order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',speed:1,
   history:[],fadeTimer:null,scope:'bank',
-  qtTaps:[],qtW:1200,
+  qtTaps:[],qtW:900,
   lumaGL:null,lumaActive:false,lumaRaf:null,
 };
 
@@ -680,7 +681,15 @@ function applySpeed(){vA.playbackRate=S.speed;vB.playbackRate=S.speed;}
 });
 
 // ═══ quad-tap ═══
-function checkQT(){const now=Date.now();S.qtTaps.push(now);S.qtTaps=S.qtTaps.filter(t=>now-t<S.qtW);if(S.qtTaps.length>=4){S.qtTaps=[];return true;}return false;}
+function checkQT(){
+  const now=Date.now();
+  // Debounce: ignore taps closer than 80ms apart (likely event doubling)
+  if(S.qtTaps.length&&now-S.qtTaps[S.qtTaps.length-1]<80)return false;
+  S.qtTaps.push(now);
+  S.qtTaps=S.qtTaps.filter(t=>now-t<S.qtW);
+  if(S.qtTaps.length>=4){S.qtTaps=[];return true;}
+  return false;
+}
 
 // ═══ gamepad ═══
 window.addEventListener('gamepadconnected',e=>{msg('controller: '+e.gamepad.id.split('(')[0].trim());if(!S.gpR)gpPoll();});
@@ -688,19 +697,37 @@ window.addEventListener('gamepaddisconnected',()=>msg('controller disconnected')
 function gpPoll(){
   const gp=navigator.getGamepads()[0];
   if(gp){const p={};gp.buttons.forEach((b,i)=>p[i]=b.pressed);const jp=i=>p[i]&&!S.gp[i];const ax=[gp.axes[0]||0,gp.axes[1]||0];const T=0.5;const al=ax[0]<-T&&S.gpAx[0]>=-T,ar=ax[0]>T&&S.gpAx[0]<=T,au=ax[1]<-T&&S.gpAx[1]>=-T,ad=ax[1]>T&&S.gpAx[1]<=T;const A=jp(0),B=jp(1),LB=jp(4),RB=jp(5),St=jp(9);const DL=jp(14)||al,DR=jp(15)||ar,DU=jp(12)||au,DD=jp(13)||ad;
+  const Bheld=p[1];// B currently held (for combo)
+  // B+direction = bank switch (for controllers without shoulders)
+  const bCombo=Bheld&&(DL||DR);
   if(menu.classList.contains('on')){if(B||St)menuClose();}
-  else if(S.mode==='player'){if(DL)prev();if(DR)next();if(B||St)gridOpen();if(LB||RB)bSwitch();}
-  else if(S.mode==='grid'){if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);if(A)gridPlay(S.gs);if(B||St)gridClose();if(LB||RB){const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}}
+  else if(S.mode==='player'){
+    if(bCombo){const dir=DR?1:-1;const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length>1){const ci=v.indexOf(S.bank);const nb=v[(ci+dir+v.length)%v.length];S.scope='bank';xfade(0,nb);msg(S.banks[nb].name);}}
+    else{if(DL)prev();if(DR)next();if(B||St)gridOpen();if(LB||RB)bSwitch();}
+  }
+  else if(S.mode==='grid'){
+    if(bCombo){const dir=DR?1:-1;const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+dir+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}
+    else{if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);if(A)gridPlay(S.gs);if(B||St)gridClose();if(LB||RB){const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}}
+  }
   S.gp={...p};S.gpAx=ax;}
   S.gpR=requestAnimationFrame(gpPoll);
 }
 
 // ═══ touch / mouse ═══
-let usedTouch=false;
+let usedTouch=false,isPinch=false;
 function pDown(x,y){S.tx=x;S.ty=y;S.tt=Date.now();}
 function pUp(x,y){const dx=x-S.tx,dy=y-S.ty,ax=Math.abs(dx),ay=Math.abs(dy),dt=Date.now()-S.tt;if(menu.classList.contains('on'))return;if(S.mode==='player'){if(ax<25&&ay<25&&dt<400){if(checkQT()){menuOpen();return;}hudFlash();return;}if(ax>ay&&ax>50){dx>0?prev():next();}else if(ay>ax&&ay>60){dy<0?gridOpen():hudFlash();}}}
-el('player').addEventListener('touchstart',e=>{usedTouch=true;pDown(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
-el('player').addEventListener('touchend',e=>pUp(e.changedTouches[0].clientX,e.changedTouches[0].clientY),{passive:true});
+el('player').addEventListener('touchstart',e=>{
+  usedTouch=true;
+  if(e.touches.length>=2){isPinch=true;return;}
+  isPinch=false;
+  pDown(e.touches[0].clientX,e.touches[0].clientY);
+},{passive:true});
+el('player').addEventListener('touchend',e=>{
+  // If this was a pinch gesture, suppress swipe/tap handling
+  if(isPinch){if(e.touches.length===0)isPinch=false;return;}
+  pUp(e.changedTouches[0].clientX,e.changedTouches[0].clientY);
+},{passive:true});
 el('player').addEventListener('mousedown',e=>{if(usedTouch){usedTouch=false;return;}pDown(e.clientX,e.clientY);});
 el('player').addEventListener('mouseup',e=>{if(usedTouch)return;pUp(e.clientX,e.clientY);});
 let gTy=0;
