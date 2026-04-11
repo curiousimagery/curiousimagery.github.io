@@ -159,7 +159,7 @@
 
 <div id="menu">
   <div class="menu-scroll">
-    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v6</span></div>
+    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v7</span></div>
 
     <button class="m-item" id="mAdd">add more media</button>
     <button class="m-item" id="mClear">clear all &amp; reset <span id="mClipCount" style="color:var(--dim);"></span></button>
@@ -268,7 +268,7 @@ const S={
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
   order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',
-  history:[],fadeTimer:null,
+  history:[],fadeTimer:null,scope:'bank',
   qtTaps:[],qtW:1200,
   lumaGL:null,lumaActive:false,lumaRaf:null,
 };
@@ -413,7 +413,7 @@ addBtn.onclick=()=>{
 goBtn.onclick=()=>{if(!totalClips())return;el('setup').classList.remove('on');go();};
 
 // ═══ player ═══
-function go(){S.mode='player';el('player').classList.add('on');S.bank=S.banks.findIndex(b=>b&&b.clips.length);S.clip=0;playCur();autoStart();}
+function go(){S.mode='player';el('player').classList.add('on');S.bank=S.banks.findIndex(b=>b&&b.clips.length);S.clip=0;S.scope=multiBank()?'all':'bank';playCur();autoStart();}
 function cBank(){return S.banks[S.bank];}
 function cClip(){const b=cBank();return b?b.clips[S.clip]:null;}
 function vAct(){return S.av==='A'?vA:vB;}
@@ -517,14 +517,31 @@ async function xfade(ci,bi){
   S.fadeTimer=setTimeout(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;S.fadeTimer=null;hudUpdate();},dur+300);
 }
 
-function pickNext(){const b=cBank();if(!b)return 0;if(S.order==='shuffle'){if(b.clips.length<=1)return 0;let r;do{r=Math.floor(Math.random()*b.clips.length);}while(r===S.clip);return r;}return(S.clip+1)%b.clips.length;}
-function next(){if(!cBank())return;xfade(pickNext());autoReset();}
+// Build flat list of all clips across banks: [{bi,ci,clip},...]
+function allClips(){const a=[];S.banks.forEach((b,bi)=>{if(!b||!b.clips.length)return;b.clips.forEach((clip,ci)=>{a.push({bi,ci,clip});});});return a;}
+// Find current clip's index within the all-clips list
+function allIndex(){const a=allClips();return a.findIndex(g=>g.bi===S.bank&&g.ci===S.clip);}
+
+function pickNext(){
+  if(S.scope==='all'){
+    const a=allClips();if(a.length<=1)return null;
+    const cur=allIndex();
+    if(S.order==='shuffle'){let r;do{r=Math.floor(Math.random()*a.length);}while(r===cur);return a[r];}
+    return a[(cur+1)%a.length];
+  }
+  // bank scope
+  const b=cBank();if(!b)return null;
+  if(S.order==='shuffle'){if(b.clips.length<=1)return null;let r;do{r=Math.floor(Math.random()*b.clips.length);}while(r===S.clip);return{bi:S.bank,ci:r};}
+  return{bi:S.bank,ci:(S.clip+1)%b.clips.length};
+}
+function next(){
+  const p=pickNext();if(!p)return;
+  xfade(p.ci,p.bi);autoReset();
+}
 function prev(){
-  if(!cBank())return;
-  // Always go to the last-viewed clip regardless of shuffle
+  // Always go to the last-viewed clip regardless of shuffle/scope
   if(S.history.length){
     const h=S.history.pop();
-    // Skip the history push inside xfade by going direct
     if(S.fading)cancelFade();
     S.fading=true;
     S.bank=h.bank;S.clip=h.clip;
@@ -532,21 +549,26 @@ function prev(){
     const out=vAct(),inc=vNxt();
     const fit=S.scaling==='fill'?'cover':'contain';
     inc.style.objectFit=fit;inc.style.objectPosition='center';
-    // Always hard-cut for back navigation
     inc.src=c.url;inc.style.opacity='1';inc.style.transition='none';
     lumaC.style.display='none';inc.style.zIndex='2';out.style.zIndex='1';
     inc.play().then(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();}).catch(()=>{S.fading=false;});
   } else {
-    // No history, fall back to sequential prev
-    const b=cBank();if(!b)return;
-    xfade((S.clip-1+b.clips.length)%b.clips.length);
+    // No history — go sequentially backward respecting scope
+    if(S.scope==='all'){
+      const a=allClips();const cur=allIndex();
+      const p=a[(cur-1+a.length)%a.length];
+      if(p)xfade(p.ci,p.bi);
+    } else {
+      const b=cBank();if(!b)return;
+      xfade((S.clip-1+b.clips.length)%b.clips.length);
+    }
   }
   autoReset();
 }
-function bSwitch(){const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length<=1){msg('only one bank');return;}const nb=v[(v.indexOf(S.bank)+1)%v.length];xfade(0,nb);msg(S.banks[nb].name);}
+function bSwitch(){const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length<=1){msg('only one bank');return;}const nb=v[(v.indexOf(S.bank)+1)%v.length];S.scope='bank';xfade(0,nb);msg(S.banks[nb].name);}
 function autoStart(){clearInterval(S.autoT);S.autoT=setInterval(()=>{if(S.mode==='player'&&!S.fading)next();},AUTO);}
 function autoReset(){autoStart();}
-function hudUpdate(){const c=cClip(),b=cBank();if(c)hTitle.textContent=c.name;if(b)hMeta.textContent=b.name+' · '+(S.clip+1)+'/'+b.clips.length;}
+function hudUpdate(){const c=cClip(),b=cBank();if(c)hTitle.textContent=c.name;if(b){const scope=S.scope==='all'?'all':'';const pos=S.scope==='all'?(allIndex()+1)+'/'+allClips().length:(S.clip+1)+'/'+b.clips.length;hMeta.textContent=(scope?scope+' · ':b.name+' · ')+pos;}}
 function hudFlash(){hud.classList.add('show');clearTimeout(S.hudT);S.hudT=setTimeout(()=>hud.classList.remove('show'),HUD_T);}
 (function tick(){const v=vAct();if(v&&v.duration)hFill.style.width=(v.currentTime/v.duration*100)+'%';requestAnimationFrame(tick);})();
 
@@ -600,6 +622,7 @@ function gridBuild(){
 function gridSel(){const cells=gInner.querySelectorAll('.cell');cells.forEach((cell,i)=>{const is=i===S.gs;cell.classList.toggle('sel',is);let vid=cell.querySelector('video');if(is&&!vid&&S.gClips[i]){const clip=S.gClips[i].clip;vid=document.createElement('video');vid.playsInline=true;vid.muted=true;vid.loop=true;vid.src=clip.url;cell.appendChild(vid);setTimeout(()=>vid.play().then(()=>vid.classList.add('live')).catch(()=>{}),80);}else if(!is&&vid){vid.classList.remove('live');setTimeout(()=>{vid.pause();vid.src='';vid.load();vid.remove();},500);}});}
 function gridPlay(i){
   const g=S.gClips[i];if(!g)return;
+  S.scope=S.gb===-1?'all':'bank';
   gridClose();
   S.bank=g.bi;
   S.clip=g.ci;
