@@ -60,6 +60,7 @@
   .g-tabs{display:flex;gap:0.4em;}
   .g-tab{font-size:0.875rem;letter-spacing:0.06em;color:var(--dim);background:none;border:1px solid var(--faint2);padding:0.3em 0.6em;border-radius:2px;cursor:pointer;font-family:inherit;transition:all 0.2s;}
   .g-tab.on{color:var(--fg);border-color:var(--faint);background:var(--faint2);}
+  .g-tab.focus{outline:1.5px solid var(--fg);outline-offset:1px;}
   .g-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 var(--gap) var(--gap);}
   .g-inner{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap);}
   .cell{position:relative;aspect-ratio:16/9;background:#111;border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;}
@@ -159,7 +160,7 @@
 
 <div id="menu">
   <div class="menu-scroll">
-    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v9</span></div>
+    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v10</span></div>
 
     <button class="m-item" id="mAdd">add more media</button>
     <button class="m-item" id="mClear">clear all &amp; reset <span id="mClipCount" style="color:var(--dim);"></span></button>
@@ -230,10 +231,11 @@
         <h4>bluetooth controller</h4>
         <div class="ctrl-row"><span class="ctrl-k">d-pad ← →</span><span class="ctrl-v">prev / next (or grid)</span></div>
         <div class="ctrl-row"><span class="ctrl-k">d-pad ↑ ↓</span><span class="ctrl-v">grid rows</span></div>
-        <div class="ctrl-row"><span class="ctrl-k">a button</span><span class="ctrl-v">play selected</span></div>
-        <div class="ctrl-row"><span class="ctrl-k">b / start</span><span class="ctrl-v">toggle grid</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">a button</span><span class="ctrl-v">play selected clip</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">b (player)</span><span class="ctrl-v">open grid</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">b (grid)</span><span class="ctrl-v">toggle focus: clips ↔ banks</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">start</span><span class="ctrl-v">close grid</span></div>
         <div class="ctrl-row"><span class="ctrl-k">l / r shoulder</span><span class="ctrl-v">switch bank</span></div>
-        <div class="ctrl-row"><span class="ctrl-k">b + d-pad ← →</span><span class="ctrl-v">switch bank (no shoulders)</span></div>
       </div>
     </div>
 
@@ -272,7 +274,7 @@ const COLS=3, MAXBANK=4, AUTO=120000, HUD_T=3000, DIP_T=1000;
 const S={
   banks:[],bank:0,clip:0,mode:'splash',
   av:'A',fading:false,autoT:null,hudT:null,
-  gb:0,gs:0,gTap:-1,gTapT:0,gClips:[],
+  gb:0,gs:0,gTap:-1,gTapT:0,gClips:[],gFocus:'clips',gBankSel:0,
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
   order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',speed:1,
@@ -586,7 +588,7 @@ function hudFlash(){hud.classList.add('show');clearTimeout(S.hudT);S.hudT=setTim
 // ═══ grid ═══
 // S.gb = bank index, or -1 for "all" view
 // S.gClips = flat array of {bi, ci, clip} mapping grid cell index to real bank/clip
-function gridOpen(){S.mode='grid';el('grid').classList.add('on');S.gb=multiBank()?-1:S.bank;S.gs=0;S.gTap=-1;gridBuild();
+function gridOpen(){S.mode='grid';el('grid').classList.add('on');S.gb=multiBank()?-1:S.bank;S.gs=0;S.gTap=-1;S.gFocus='clips';gridBuild();
   // Try to highlight current clip in grid
   const cur=S.gClips.findIndex(g=>g.bi===S.bank&&g.ci===S.clip);
   if(cur>=0){S.gs=cur;gridSel();}
@@ -643,6 +645,12 @@ function gridPlay(i){
   autoReset();
 }
 function gridNav(dx,dy){const cnt=S.gClips.length;if(!cnt)return;let row=Math.floor(S.gs/COLS),col=S.gs%COLS;let nr=Math.max(0,Math.min(Math.floor((cnt-1)/COLS),row+dy));let nc=Math.max(0,Math.min(COLS-1,col+dx));let ni=Math.min(nr*COLS+nc,cnt-1);if(ni!==S.gs){S.gs=ni;S.gTap=-1;gridSel();const cells=gInner.querySelectorAll('.cell');if(cells[ni])cells[ni].scrollIntoView({block:'nearest',behavior:'smooth'});}}
+function gridBankList(){return[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];}
+function gridHighlightBank(){
+  const tabs=gTabs.querySelectorAll('.g-tab');
+  const vb=gridBankList();
+  tabs.forEach((t,i)=>{t.classList.toggle('focus',S.gFocus==='banks'&&i===S.gBankSel);});
+}
 
 // ═══ menu ═══
 function menuOpen(){menu.classList.add('on');menu.querySelectorAll('.m-opt').forEach(o=>o.classList.toggle('on',S[o.dataset.opt]===o.dataset.val));const n=totalClips();el('mClipCount').textContent=n?`· ${n} clip${n!==1?'s':''}`:'';}
@@ -697,17 +705,40 @@ window.addEventListener('gamepaddisconnected',()=>msg('controller disconnected')
 function gpPoll(){
   const gp=navigator.getGamepads()[0];
   if(gp){const p={};gp.buttons.forEach((b,i)=>p[i]=b.pressed);const jp=i=>p[i]&&!S.gp[i];const ax=[gp.axes[0]||0,gp.axes[1]||0];const T=0.5;const al=ax[0]<-T&&S.gpAx[0]>=-T,ar=ax[0]>T&&S.gpAx[0]<=T,au=ax[1]<-T&&S.gpAx[1]>=-T,ad=ax[1]>T&&S.gpAx[1]<=T;const A=jp(0),B=jp(1),LB=jp(4),RB=jp(5),St=jp(9);const DL=jp(14)||al,DR=jp(15)||ar,DU=jp(12)||au,DD=jp(13)||ad;
-  const Bheld=p[1];// B currently held (for combo)
-  // B+direction = bank switch (for controllers without shoulders)
-  const bCombo=Bheld&&(DL||DR);
   if(menu.classList.contains('on')){if(B||St)menuClose();}
   else if(S.mode==='player'){
-    if(bCombo){const dir=DR?1:-1;const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length>1){const ci=v.indexOf(S.bank);const nb=v[(ci+dir+v.length)%v.length];S.scope='bank';xfade(0,nb);msg(S.banks[nb].name);}}
-    else{if(DL)prev();if(DR)next();if(B||St)gridOpen();if(LB||RB)bSwitch();}
+    if(DL)prev();if(DR)next();if(B)gridOpen();if(St)gridOpen();if(LB||RB)bSwitch();
   }
   else if(S.mode==='grid'){
-    if(bCombo){const dir=DR?1:-1;const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+dir+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}
-    else{if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);if(A)gridPlay(S.gs);if(B||St)gridClose();if(LB||RB){const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}}
+    if(St)gridClose();
+    else if(B){
+      // B cycles focus: clips → banks → clips
+      if(S.gFocus==='clips'&&multiBank()){
+        S.gFocus='banks';
+        // Init bank cursor to current bank tab
+        const vb=gridBankList();
+        S.gBankSel=Math.max(0,vb.indexOf(S.gb));
+        gridHighlightBank();
+      } else {
+        S.gFocus='clips';
+        gridHighlightBank();
+      }
+    }
+    else if(S.gFocus==='banks'){
+      const vb=gridBankList();
+      if(DL&&vb.length>1){S.gBankSel=(S.gBankSel-1+vb.length)%vb.length;gridHighlightBank();}
+      if(DR&&vb.length>1){S.gBankSel=(S.gBankSel+1)%vb.length;gridHighlightBank();}
+      if(DD||A){
+        // Select this bank and drop back to clips
+        S.gb=vb[S.gBankSel];S.gs=0;S.gTap=-1;S.gFocus='clips';gridBuild();
+      }
+    }
+    else{
+      // clips focused
+      if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);
+      if(A)gridPlay(S.gs);
+      if(LB||RB){const vb=gridBankList();if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}
+    }
   }
   S.gp={...p};S.gpAx=ax;}
   S.gpR=requestAnimationFrame(gpPoll);
