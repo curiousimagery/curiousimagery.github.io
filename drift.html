@@ -264,6 +264,7 @@ const S={
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
   order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',
+  history:[],fadeTimer:null,
   qtTaps:[],qtW:1200,
   lumaGL:null,lumaActive:false,lumaRaf:null,
 };
@@ -287,22 +288,44 @@ function mkThumb(file){
   return new Promise(resolve=>{
     const url=URL.createObjectURL(file);
     const v=document.createElement('video');
-    v.preload='auto';v.muted=true;v.playsInline=true;v.src=url;
+    v.preload='auto';v.muted=true;v.playsInline=true;
     let done=false;
-    function grab(){if(done)return;done=true;const c=document.createElement('canvas');const vw=v.videoWidth||320,vh=v.videoHeight||180;c.width=320;c.height=Math.round(320*vh/vw)||180;try{c.getContext('2d').drawImage(v,0,0,c.width,c.height);}catch(e){}v.pause();v.removeAttribute('src');v.load();resolve({thumb:c,url,dur:v.duration||0});}
-    function fail(){if(done)return;done=true;const c=document.createElement('canvas');c.width=320;c.height=180;c.getContext('2d').fillStyle='#151515';c.getContext('2d').fillRect(0,0,320,180);v.pause();v.removeAttribute('src');v.load();resolve({thumb:c,url,dur:0});}
-    // Play first to prime decoding in PWA standalone mode, then seek
+    function grab(){
+      if(done)return;done=true;
+      const c=document.createElement('canvas');
+      const vw=v.videoWidth||320,vh=v.videoHeight||180;
+      c.width=320;c.height=Math.round(320*vh/vw)||180;
+      try{c.getContext('2d').drawImage(v,0,0,c.width,c.height);}catch(e){}
+      const dur=v.duration||0;
+      v.pause();v.removeAttribute('src');v.load();
+      resolve({thumb:c,url,dur});
+    }
+    function fail(){
+      if(done)return;done=true;
+      const c=document.createElement('canvas');c.width=320;c.height=180;
+      c.getContext('2d').fillStyle='#151515';c.getContext('2d').fillRect(0,0,320,180);
+      v.pause();v.removeAttribute('src');v.load();
+      resolve({thumb:c,url,dur:0});
+    }
+    // Strategy: play the video to force iOS to decode a frame, then grab it.
+    // No seeking — iOS PWA standalone mode blocks seeks on background videos.
     v.onloadeddata=()=>{
-      v.play().then(()=>{
-        try{v.currentTime=0.1;}catch(e){grab();}
-      }).catch(()=>{
-        // If play fails, try seeking directly
-        try{v.currentTime=0.1;}catch(e){grab();}
-      });
+      // Try to grab immediately — some browsers have a frame at loadeddata
+      if(v.videoWidth>0){
+        // Use requestVideoFrameCallback if available (Safari 15.4+)
+        if(v.requestVideoFrameCallback){
+          v.requestVideoFrameCallback(()=>grab());
+          v.play().catch(()=>{});
+        } else {
+          v.play().then(()=>{
+            // Wait a moment for a frame to actually render
+            setTimeout(grab,100);
+          }).catch(()=>grab());
+        }
+      }
     };
-    v.onseeked=grab;
-    v.oncanplay=()=>{if(!done)setTimeout(()=>{if(!done)grab();},500);};
     v.onerror=fail;
+    v.src=url;
     setTimeout(fail,4000);
   });
 }
@@ -399,29 +422,48 @@ async function playCur(){
   try{await v.play();}catch(e){}hudUpdate();
 }
 
+function cancelFade(){
+  if(!S.fading)return;
+  // Cancel any pending luma animation
+  if(S.lumaRaf){cancelAnimationFrame(S.lumaRaf);S.lumaRaf=null;}
+  // Cancel any pending timeout
+  if(S.fadeTimer){clearTimeout(S.fadeTimer);S.fadeTimer=null;}
+  // Snap to end state: incoming on top, outgoing cleaned up
+  const inc=vNxt(),out=vAct();
+  lumaC.style.display='none';
+  inc.style.transition='none';inc.style.opacity='1';inc.style.zIndex='2';
+  out.style.transition='none';out.style.opacity='0';out.style.zIndex='1';
+  out.pause();out.removeAttribute('src');out.load();
+  S.av=S.av==='A'?'B':'A';
+  S.fading=false;
+}
+
 async function xfade(ci,bi){
-  if(S.fading)return;S.fading=true;
+  if(S.fading)cancelFade();
+  S.fading=true;
+  // Push current clip to history before changing
+  if(cClip())S.history.push({bank:S.bank,clip:S.clip});
+  if(S.history.length>50)S.history.shift();
   if(bi!==undefined)S.bank=bi;S.clip=ci;
   const c=cClip();if(!c){S.fading=false;return;}
   const out=vAct(),inc=vNxt();
   const dur=S.fadeMs;
+  // Apply current scaling to incoming video
+  const fit=S.scaling==='fill'?'cover':'contain';
+  inc.style.objectFit=fit;inc.style.objectPosition='center';
 
   if(S.transition==='cut'){
     inc.src=c.url;inc.style.opacity='1';inc.style.transition='none';
-    // Keep outgoing on top until incoming has a decoded frame
     inc.style.zIndex='1';out.style.zIndex='2';
     lumaC.style.display='none';
     try{
       await inc.play();
-      // Wait for an actual frame to be decoded and painted
       if(inc.requestVideoFrameCallback){
         await new Promise(r=>inc.requestVideoFrameCallback(r));
       } else {
-        // Fallback: wait for one animation frame after play resolves
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
       }
     }catch(e){}
-    // Atomic swap: incoming on top, then immediately clean up outgoing
     inc.style.zIndex='2';out.style.zIndex='1';
     out.pause();out.removeAttribute('src');out.load();
     S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();return;
@@ -431,18 +473,18 @@ async function xfade(ci,bi){
     lumaC.style.display='none';
     const half=dur/2;
     out.style.transition=`opacity ${half}ms ease`;out.style.opacity='0';
-    await new Promise(r=>setTimeout(r,half+100));
+    await new Promise(r=>{S.fadeTimer=setTimeout(r,half+100);});
+    if(!S.fading)return; // cancelled
     out.pause();out.removeAttribute('src');out.load();
     inc.src=c.url;inc.style.opacity='0';inc.style.transition='none';inc.style.zIndex='2';out.style.zIndex='1';
     try{await inc.play();}catch(e){}inc.offsetHeight;
     inc.style.transition=`opacity ${half}ms ease`;
     requestAnimationFrame(()=>{inc.style.opacity='1';});
-    setTimeout(()=>{S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();},half+200);
+    S.fadeTimer=setTimeout(()=>{S.av=S.av==='A'?'B':'A';S.fading=false;S.fadeTimer=null;hudUpdate();},half+200);
     return;
   }
 
   if(S.transition==='luma'&&S.lumaGL){
-    // luma blend via WebGL
     inc.src=c.url;inc.style.opacity='0';inc.style.transition='none';
     out.style.opacity='0';out.style.transition='none';
     try{await inc.play();}catch(e){}
@@ -468,14 +510,36 @@ async function xfade(ci,bi){
   try{await inc.play();}catch(e){}inc.offsetHeight;
   inc.style.transition=`opacity ${dur}ms ease`;out.style.transition=`opacity ${dur}ms ease`;
   requestAnimationFrame(()=>{inc.style.opacity='1';out.style.opacity='0';});
-  setTimeout(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();},dur+300);
+  S.fadeTimer=setTimeout(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;S.fadeTimer=null;hudUpdate();},dur+300);
 }
 
 function pickNext(){const b=cBank();if(!b)return 0;if(S.order==='shuffle'){if(b.clips.length<=1)return 0;let r;do{r=Math.floor(Math.random()*b.clips.length);}while(r===S.clip);return r;}return(S.clip+1)%b.clips.length;}
-function pickPrev(){const b=cBank();if(!b)return 0;if(S.order==='shuffle'){if(b.clips.length<=1)return 0;let r;do{r=Math.floor(Math.random()*b.clips.length);}while(r===S.clip);return r;}return(S.clip-1+b.clips.length)%b.clips.length;}
 function next(){if(!cBank())return;xfade(pickNext());autoReset();}
-function prev(){if(!cBank())return;xfade(pickPrev());autoReset();}
-function bSwitch(){const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length<=1){msg('only one bank');return;}const nb=v[(v.indexOf(S.bank)+1)%v.length];S.fading=false;xfade(0,nb);msg(S.banks[nb].name);}
+function prev(){
+  if(!cBank())return;
+  // Always go to the last-viewed clip regardless of shuffle
+  if(S.history.length){
+    const h=S.history.pop();
+    // Skip the history push inside xfade by going direct
+    if(S.fading)cancelFade();
+    S.fading=true;
+    S.bank=h.bank;S.clip=h.clip;
+    const c=cClip();if(!c){S.fading=false;return;}
+    const out=vAct(),inc=vNxt();
+    const fit=S.scaling==='fill'?'cover':'contain';
+    inc.style.objectFit=fit;inc.style.objectPosition='center';
+    // Always hard-cut for back navigation
+    inc.src=c.url;inc.style.opacity='1';inc.style.transition='none';
+    lumaC.style.display='none';inc.style.zIndex='2';out.style.zIndex='1';
+    inc.play().then(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();}).catch(()=>{S.fading=false;});
+  } else {
+    // No history, fall back to sequential prev
+    const b=cBank();if(!b)return;
+    xfade((S.clip-1+b.clips.length)%b.clips.length);
+  }
+  autoReset();
+}
+function bSwitch(){const v=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(v.length<=1){msg('only one bank');return;}const nb=v[(v.indexOf(S.bank)+1)%v.length];xfade(0,nb);msg(S.banks[nb].name);}
 function autoStart(){clearInterval(S.autoT);S.autoT=setInterval(()=>{if(S.mode==='player'&&!S.fading)next();},AUTO);}
 function autoReset(){autoStart();}
 function hudUpdate(){const c=cClip(),b=cBank();if(c)hTitle.textContent=c.name;if(b)hMeta.textContent=b.name+' · '+(S.clip+1)+'/'+b.clips.length;}
