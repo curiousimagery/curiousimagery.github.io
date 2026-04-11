@@ -70,13 +70,13 @@
   .cell video.live{opacity:1;}
 
   /* menu */
-  #menu{position:fixed;inset:0;z-index:600;display:none;flex-direction:column;background:rgba(10,10,10,0.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
-  #menu.on{display:flex;}
+  #menu{position:fixed;inset:0;z-index:600;display:none;background:rgba(10,10,10,0.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  #menu.on{display:block;}
   .menu-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:1em 1.5em;padding-top:calc(env(safe-area-inset-top) + 1em);background:rgba(10,10,10,0.96);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--faint2);}
   .menu-title{font-size:0.875rem;letter-spacing:0.1em;color:var(--dim);font-weight:300;}
   .menu-x{font-size:1.2rem;color:var(--dim);background:none;border:none;cursor:pointer;font-family:inherit;padding:0.2em 0.4em;transition:color 0.2s;line-height:1;}
   .menu-x:hover,.menu-x:active{color:var(--fg);}
-  .menu-scroll{max-width:560px;margin:0 auto;padding:1em 1.5em;padding-bottom:calc(env(safe-area-inset-bottom) + 2em);overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;}
+  .menu-scroll{max-width:560px;margin:0 auto;padding:1em 1.5em;padding-bottom:calc(env(safe-area-inset-bottom) + 2em);}
 
   .m-item{display:block;width:100%;text-align:left;font-size:0.9375rem;letter-spacing:0.06em;color:var(--fg);background:none;border:none;border-bottom:1px solid var(--faint2);padding:0.9em 0;cursor:pointer;font-family:inherit;font-weight:300;transition:color 0.2s;}
   .m-item:hover,.m-item:active{color:#fff;}
@@ -160,7 +160,7 @@
 
 <div id="menu">
   <div class="menu-head">
-    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.1</span></div>
+    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.2</span></div>
     <button class="menu-x" id="mClose">✕</button>
   </div>
   <div class="menu-scroll">
