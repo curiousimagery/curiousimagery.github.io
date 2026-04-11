@@ -159,10 +159,21 @@
 
 <div id="menu">
   <div class="menu-scroll">
-    <div class="menu-title">settings</div>
+    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v6</span></div>
 
-    <button class="m-item" id="mAdd">add more clips</button>
-    <button class="m-item" id="mClear">clear all &amp; reset</button>
+    <button class="m-item" id="mAdd">add more media</button>
+    <button class="m-item" id="mClear">clear all &amp; reset <span id="mClipCount" style="color:var(--dim);"></span></button>
+
+    <div class="m-section">
+      <div class="m-section-title">display</div>
+      <div class="m-row">
+        <span class="m-label">scaling</span>
+        <div class="m-opts">
+          <button class="m-opt on" data-opt="scaling" data-val="fit">fit</button>
+          <button class="m-opt" data-opt="scaling" data-val="fill">fill</button>
+        </div>
+      </div>
+    </div>
 
     <div class="m-section">
       <div class="m-section-title">playback</div>
@@ -185,13 +196,6 @@
         <label>transition duration</label>
         <input type="range" id="fadeSlider" min="200" max="8000" step="100" value="2200">
         <span class="m-slider-val" id="fadeVal">2.2s</span>
-      </div>
-      <div class="m-row">
-        <span class="m-label">scaling</span>
-        <div class="m-opts">
-          <button class="m-opt on" data-opt="scaling" data-val="fit">fit</button>
-          <button class="m-opt" data-opt="scaling" data-val="fill">fill</button>
-        </div>
       </div>
     </div>
 
@@ -260,7 +264,7 @@ const COLS=3, MAXBANK=4, AUTO=120000, HUD_T=3000, DIP_T=1000;
 const S={
   banks:[],bank:0,clip:0,mode:'splash',
   av:'A',fading:false,autoT:null,hudT:null,
-  gb:0,gs:0,gTap:-1,gTapT:0,
+  gb:0,gs:0,gTap:-1,gTapT:0,gClips:[],
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
   order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',
@@ -547,31 +551,67 @@ function hudFlash(){hud.classList.add('show');clearTimeout(S.hudT);S.hudT=setTim
 (function tick(){const v=vAct();if(v&&v.duration)hFill.style.width=(v.currentTime/v.duration*100)+'%';requestAnimationFrame(tick);})();
 
 // ═══ grid ═══
-function gridOpen(){S.mode='grid';el('grid').classList.add('on');S.gb=S.bank;S.gs=S.clip;S.gTap=-1;gridBuild();}
+// S.gb = bank index, or -1 for "all" view
+// S.gClips = flat array of {bi, ci, clip} mapping grid cell index to real bank/clip
+function gridOpen(){S.mode='grid';el('grid').classList.add('on');S.gb=multiBank()?-1:S.bank;S.gs=0;S.gTap=-1;gridBuild();
+  // Try to highlight current clip in grid
+  const cur=S.gClips.findIndex(g=>g.bi===S.bank&&g.ci===S.clip);
+  if(cur>=0){S.gs=cur;gridSel();}
+}
 function gridClose(){gInner.querySelectorAll('video').forEach(v=>{v.pause();v.src='';v.load();});el('grid').classList.remove('on');S.mode='player';}
+function gridBuildClips(){
+  // Build the flat clip list for current grid view
+  S.gClips=[];
+  if(S.gb===-1){
+    // "all" view — all banks
+    S.banks.forEach((b,bi)=>{if(!b||!b.clips.length)return;b.clips.forEach((clip,ci)=>{S.gClips.push({bi,ci,clip});});});
+  } else {
+    const bank=S.banks[S.gb];
+    if(bank)bank.clips.forEach((clip,ci)=>{S.gClips.push({bi:S.gb,ci,clip});});
+  }
+}
 function gridBuild(){
   gTabs.innerHTML='';
-  if(multiBank())S.banks.forEach((b,i)=>{if(!b||!b.clips.length)return;const t=document.createElement('button');t.className='g-tab'+(i===S.gb?' on':'');t.textContent=b.name;t.onclick=()=>{S.gb=i;S.gs=0;S.gTap=-1;gridBuild();};gTabs.appendChild(t);});
-  const bank=S.banks[S.gb];if(!bank)return;gInner.innerHTML='';
-  bank.clips.forEach((clip,i)=>{const cell=document.createElement('div');cell.className='cell'+(i===S.gs?' sel':'');const cvs=document.createElement('canvas');cvs.width=clip.thumb.width;cvs.height=clip.thumb.height;cvs.getContext('2d').drawImage(clip.thumb,0,0);cell.appendChild(cvs);cell.onclick=(e)=>{e.stopPropagation();const now=Date.now();if(S.gTap===i&&now-S.gTapT<600)gridPlay(i);else{S.gs=i;S.gTap=i;S.gTapT=now;gridSel();}};gInner.appendChild(cell);});
+  gridBuildClips();
+  if(multiBank()){
+    // "all" tab
+    const at=document.createElement('button');at.className='g-tab'+(S.gb===-1?' on':'');at.textContent='all';at.onclick=()=>{S.gb=-1;S.gs=0;S.gTap=-1;gridBuild();};gTabs.appendChild(at);
+    // individual bank tabs
+    S.banks.forEach((b,i)=>{if(!b||!b.clips.length)return;const t=document.createElement('button');t.className='g-tab'+(i===S.gb?' on':'');t.textContent=b.name;t.onclick=()=>{S.gb=i;S.gs=0;S.gTap=-1;gridBuild();};gTabs.appendChild(t);});
+  }
+  gInner.innerHTML='';
+  let lastBi=-1;
+  S.gClips.forEach((g,i)=>{
+    // In "all" view, add bank label separators
+    if(S.gb===-1&&g.bi!==lastBi&&multiBank()){
+      lastBi=g.bi;
+      const lbl=document.createElement('div');
+      lbl.style.cssText='grid-column:1/-1;font-size:0.875rem;letter-spacing:0.06em;color:var(--dim);padding:0.6em 0.2em 0.2em;';
+      lbl.textContent=S.banks[g.bi].name;
+      gInner.appendChild(lbl);
+    }
+    const cell=document.createElement('div');cell.className='cell'+(i===S.gs?' sel':'');
+    const cvs=document.createElement('canvas');cvs.width=g.clip.thumb.width;cvs.height=g.clip.thumb.height;cvs.getContext('2d').drawImage(g.clip.thumb,0,0);cell.appendChild(cvs);
+    cell.onclick=(e)=>{e.stopPropagation();const now=Date.now();if(S.gTap===i&&now-S.gTapT<600)gridPlay(i);else{S.gs=i;S.gTap=i;S.gTapT=now;gridSel();}};
+    gInner.appendChild(cell);
+  });
   gridSel();
 }
-function gridSel(){const cells=gInner.querySelectorAll('.cell');cells.forEach((cell,i)=>{const is=i===S.gs;cell.classList.toggle('sel',is);let vid=cell.querySelector('video');if(is&&!vid){const clip=S.banks[S.gb].clips[i];vid=document.createElement('video');vid.playsInline=true;vid.muted=true;vid.loop=true;vid.src=clip.url;cell.appendChild(vid);setTimeout(()=>vid.play().then(()=>vid.classList.add('live')).catch(()=>{}),80);}else if(!is&&vid){vid.classList.remove('live');setTimeout(()=>{vid.pause();vid.src='';vid.load();vid.remove();},500);}});}
+function gridSel(){const cells=gInner.querySelectorAll('.cell');cells.forEach((cell,i)=>{const is=i===S.gs;cell.classList.toggle('sel',is);let vid=cell.querySelector('video');if(is&&!vid&&S.gClips[i]){const clip=S.gClips[i].clip;vid=document.createElement('video');vid.playsInline=true;vid.muted=true;vid.loop=true;vid.src=clip.url;cell.appendChild(vid);setTimeout(()=>vid.play().then(()=>vid.classList.add('live')).catch(()=>{}),80);}else if(!is&&vid){vid.classList.remove('live');setTimeout(()=>{vid.pause();vid.src='';vid.load();vid.remove();},500);}});}
 function gridPlay(i){
-  // When selecting from grid, hard-cut to the new clip (no crossfade from old clip)
+  const g=S.gClips[i];if(!g)return;
   gridClose();
-  S.bank=S.gb;
-  S.clip=i;
-  // Stop current video, switch directly to new clip
+  S.bank=g.bi;
+  S.clip=g.ci;
   const out=vAct();
   out.pause();out.removeAttribute('src');out.load();
   playCur();
   autoReset();
 }
-function gridNav(dx,dy){const bank=S.banks[S.gb];if(!bank)return;const cnt=bank.clips.length;let row=Math.floor(S.gs/COLS),col=S.gs%COLS;let nr=Math.max(0,Math.min(Math.floor((cnt-1)/COLS),row+dy));let nc=Math.max(0,Math.min(COLS-1,col+dx));let ni=Math.min(nr*COLS+nc,cnt-1);if(ni!==S.gs){S.gs=ni;S.gTap=-1;gridSel();const cells=gInner.querySelectorAll('.cell');if(cells[ni])cells[ni].scrollIntoView({block:'nearest',behavior:'smooth'});}}
+function gridNav(dx,dy){const cnt=S.gClips.length;if(!cnt)return;let row=Math.floor(S.gs/COLS),col=S.gs%COLS;let nr=Math.max(0,Math.min(Math.floor((cnt-1)/COLS),row+dy));let nc=Math.max(0,Math.min(COLS-1,col+dx));let ni=Math.min(nr*COLS+nc,cnt-1);if(ni!==S.gs){S.gs=ni;S.gTap=-1;gridSel();const cells=gInner.querySelectorAll('.cell');if(cells[ni])cells[ni].scrollIntoView({block:'nearest',behavior:'smooth'});}}
 
 // ═══ menu ═══
-function menuOpen(){menu.classList.add('on');menu.querySelectorAll('.m-opt').forEach(o=>o.classList.toggle('on',S[o.dataset.opt]===o.dataset.val));}
+function menuOpen(){menu.classList.add('on');menu.querySelectorAll('.m-opt').forEach(o=>o.classList.toggle('on',S[o.dataset.opt]===o.dataset.val));const n=totalClips();el('mClipCount').textContent=n?`· ${n} clip${n!==1?'s':''}`:'';}
 function menuClose(){menu.classList.remove('on');}
 el('mClose').onclick=menuClose;
 el('mAdd').onclick=()=>{menuClose();S.mode='setup';el('setup').classList.add('on');el('player').classList.remove('on');updateSetup();};
@@ -600,7 +640,7 @@ function gpPoll(){
   if(gp){const p={};gp.buttons.forEach((b,i)=>p[i]=b.pressed);const jp=i=>p[i]&&!S.gp[i];const ax=[gp.axes[0]||0,gp.axes[1]||0];const T=0.5;const al=ax[0]<-T&&S.gpAx[0]>=-T,ar=ax[0]>T&&S.gpAx[0]<=T,au=ax[1]<-T&&S.gpAx[1]>=-T,ad=ax[1]>T&&S.gpAx[1]<=T;const A=jp(0),B=jp(1),LB=jp(4),RB=jp(5),St=jp(9);const DL=jp(14)||al,DR=jp(15)||ar,DU=jp(12)||au,DD=jp(13)||ad;
   if(menu.classList.contains('on')){if(B||St)menuClose();}
   else if(S.mode==='player'){if(DL)prev();if(DR)next();if(B||St)gridOpen();if(LB||RB)bSwitch();}
-  else if(S.mode==='grid'){if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);if(A)gridPlay(S.gs);if(B||St)gridClose();if(LB||RB){const vb=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}
+  else if(S.mode==='grid'){if(DL)gridNav(-1,0);if(DR)gridNav(1,0);if(DU)gridNav(0,-1);if(DD)gridNav(0,1);if(A)gridPlay(S.gs);if(B||St)gridClose();if(LB||RB){const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+(RB?1:-1)+vb.length)%vb.length];S.gs=0;S.gTap=-1;gridBuild();}}}
   S.gp={...p};S.gpAx=ax;}
   S.gpR=requestAnimationFrame(gpPoll);
 }
@@ -616,7 +656,8 @@ let gTy=0;
 el('grid').addEventListener('touchstart',e=>{gTy=e.touches[0].clientY;},{passive:true});
 el('grid').addEventListener('touchend',e=>{if(e.changedTouches[0].clientY-gTy>100){
   // If user has focused a different clip, play it; otherwise just close
-  if(S.gs!==S.clip||S.gb!==S.bank){gridPlay(S.gs);}else{gridClose();}
+  const g=S.gClips[S.gs];
+  if(g&&(g.bi!==S.bank||g.ci!==S.clip)){gridPlay(S.gs);}else{gridClose();}
 }},{passive:true});
 el('grid').addEventListener('dblclick',e=>{if(!e.target.closest('.cell'))gridClose();});
 
@@ -625,7 +666,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='m'||e.key==='M'){menu.classList.contains('on')?menuClose():menuOpen();return;}
   if(menu.classList.contains('on')){if(e.key==='Escape')menuClose();return;}
   if(S.mode==='player'){if(e.key==='ArrowLeft')prev();if(e.key==='ArrowRight')next();if(e.key==='g'||e.key==='Escape')gridOpen();if(e.key==='b')bSwitch();}
-  else if(S.mode==='grid'){if(e.key==='ArrowLeft')gridNav(-1,0);if(e.key==='ArrowRight')gridNav(1,0);if(e.key==='ArrowUp'){e.preventDefault();gridNav(0,-1);}if(e.key==='ArrowDown'){e.preventDefault();gridNav(0,1);}if(e.key==='Enter')gridPlay(S.gs);if(e.key==='Escape'||e.key==='g')gridClose();if(e.key==='b'){const vb=S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0);if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+1)%vb.length];S.gs=0;S.gTap=-1;gridBuild();msg(S.banks[S.gb].name);}}}
+  else if(S.mode==='grid'){if(e.key==='ArrowLeft')gridNav(-1,0);if(e.key==='ArrowRight')gridNav(1,0);if(e.key==='ArrowUp'){e.preventDefault();gridNav(0,-1);}if(e.key==='ArrowDown'){e.preventDefault();gridNav(0,1);}if(e.key==='Enter')gridPlay(S.gs);if(e.key==='Escape'||e.key==='g')gridClose();if(e.key==='b'){const vb=[-1,...S.banks.map((b,i)=>(b&&b.clips.length)?i:-1).filter(i=>i>=0)];if(vb.length>1){const ci=vb.indexOf(S.gb);S.gb=vb[(ci+1)%vb.length];S.gs=0;S.gTap=-1;gridBuild();msg(S.gb===-1?'all':S.banks[S.gb].name);}}}
 });
 
 // ═══ wake lock ═══
