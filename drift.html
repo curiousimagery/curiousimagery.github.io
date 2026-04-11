@@ -159,7 +159,7 @@
 
 <div id="menu">
   <div class="menu-scroll">
-    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v7</span></div>
+    <div class="menu-title">settings <span id="mVer" style="float:right;opacity:0.5;">v8</span></div>
 
     <button class="m-item" id="mAdd">add more media</button>
     <button class="m-item" id="mClear">clear all &amp; reset <span id="mClipCount" style="color:var(--dim);"></span></button>
@@ -197,6 +197,11 @@
         <input type="range" id="fadeSlider" min="200" max="8000" step="100" value="2200">
         <span class="m-slider-val" id="fadeVal">2.2s</span>
       </div>
+      <div class="m-slider-row">
+        <label>playback speed</label>
+        <input type="range" id="speedSlider" min="0" max="4" step="1" value="2">
+        <span class="m-slider-val" id="speedVal">1×</span>
+      </div>
     </div>
 
     <button class="m-panel-toggle" id="ctrlToggle">controls reference</button>
@@ -205,10 +210,11 @@
         <h4>touch (iphone)</h4>
         <div class="ctrl-row"><span class="ctrl-k">swipe left / right</span><span class="ctrl-v">next / prev clip</span></div>
         <div class="ctrl-row"><span class="ctrl-k">swipe up</span><span class="ctrl-v">open grid</span></div>
-        <div class="ctrl-row"><span class="ctrl-k">swipe down (grid)</span><span class="ctrl-v">close grid</span></div>
         <div class="ctrl-row"><span class="ctrl-k">tap</span><span class="ctrl-v">show clip info</span></div>
         <div class="ctrl-row"><span class="ctrl-k">tap cell</span><span class="ctrl-v">select / preview</span></div>
-        <div class="ctrl-row"><span class="ctrl-k">tap selected cell again</span><span class="ctrl-v">play clip</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">double-tap cell</span><span class="ctrl-v">play clip</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">swipe down (grid)</span><span class="ctrl-v">play selected clip</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">pinch out / in</span><span class="ctrl-v">fill / fit scaling</span></div>
         <div class="ctrl-row"><span class="ctrl-k">quad-tap</span><span class="ctrl-v">open this menu</span></div>
       </div>
       <div class="ctrl-group">
@@ -239,6 +245,7 @@
       <div class="guide-step"><div class="guide-num">step 5 — you're locked in</div><div class="guide-text">the phone is now a dedicated drift player. the home gesture, control center, notification center, and app switching are all disabled. users can only interact with drift.</div></div>
       <div class="guide-step"><div class="guide-num">to exit</div><div class="guide-text">triple-click the side button → enter your passcode → tap "end" in the top left. you're back to normal ios.</div></div>
       <div class="guide-step"><div class="guide-num">tip</div><div class="guide-text">enable face id as a secondary unlock method (in guided access settings) so you can exit quickly without typing the passcode.</div></div>
+      <div class="guide-step"><div class="guide-num">hiding the home bar</div><div class="guide-text">guided access hides the home indicator bar at the bottom of the screen. if it still appears briefly, it will auto-fade after a few seconds of no touch input. for a truly clean display, guided access is the only way to suppress it in a PWA.</div></div>
     </div>
 
     <button class="m-panel-toggle" id="banksToggle">footage banks</button>
@@ -267,7 +274,7 @@ const S={
   gb:0,gs:0,gTap:-1,gTapT:0,gClips:[],
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
-  order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',
+  order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',speed:1,
   history:[],fadeTimer:null,scope:'bank',
   qtTaps:[],qtW:1200,
   lumaGL:null,lumaActive:false,lumaRaf:null,
@@ -422,6 +429,7 @@ function vNxt(){return S.av==='A'?vB:vA;}
 async function playCur(){
   const c=cClip();if(!c)return;
   const v=vAct();v.src=c.url;v.style.opacity='1';v.style.transition='none';
+  v.playbackRate=S.speed;
   lumaC.style.display='none';
   try{await v.play();}catch(e){}hudUpdate();
 }
@@ -455,6 +463,7 @@ async function xfade(ci,bi){
   // Apply current scaling to incoming video
   const fit=S.scaling==='fill'?'cover':'contain';
   inc.style.objectFit=fit;inc.style.objectPosition='center';
+  inc.playbackRate=S.speed;
 
   if(S.transition==='cut'){
     inc.src=c.url;inc.style.opacity='1';inc.style.transition='none';
@@ -549,6 +558,7 @@ function prev(){
     const out=vAct(),inc=vNxt();
     const fit=S.scaling==='fill'?'cover':'contain';
     inc.style.objectFit=fit;inc.style.objectPosition='center';
+    inc.playbackRate=S.speed;
     inc.src=c.url;inc.style.opacity='1';inc.style.transition='none';
     lumaC.style.display='none';inc.style.zIndex='2';out.style.zIndex='1';
     inc.play().then(()=>{out.pause();out.removeAttribute('src');out.load();S.av=S.av==='A'?'B':'A';S.fading=false;hudUpdate();}).catch(()=>{S.fading=false;});
@@ -642,9 +652,26 @@ el('mClear').onclick=()=>{S.banks.forEach(b=>{if(b)b.clips.forEach(c=>URL.revoke
 menu.querySelectorAll('.m-opt').forEach(o=>{o.onclick=()=>{S[o.dataset.opt]=o.dataset.val;o.closest('.m-opts').querySelectorAll('.m-opt').forEach(s=>s.classList.toggle('on',s.dataset.val===o.dataset.val));if(o.dataset.opt==='scaling')applyScaling();};});
 function applyScaling(){const v=S.scaling==='fill'?'cover':'contain';vA.style.objectFit=v;vB.style.objectFit=v;vA.style.objectPosition='center';vB.style.objectPosition='center';lumaC.style.objectFit=v;}
 
-// slider
+// sliders
 const fadeSlider=el('fadeSlider'),fadeVal=el('fadeVal');
-fadeSlider.oninput=()=>{S.fadeMs=+fadeSlider.value;fadeVal.textContent=(S.fadeMs/1000).toFixed(1)+'s';};
+const FADE_SNAP=2200,FADE_SNAP_R=200;
+fadeSlider.oninput=()=>{
+  let v=+fadeSlider.value;
+  // Snap to default
+  if(Math.abs(v-FADE_SNAP)<=FADE_SNAP_R)v=FADE_SNAP;
+  S.fadeMs=v;fadeSlider.value=v;
+  fadeVal.textContent=(S.fadeMs/1000).toFixed(1)+'s';
+};
+
+const speedSlider=el('speedSlider'),speedVal=el('speedVal');
+const SPEED_STEPS=[0.25,0.5,1,1.5,2];
+speedSlider.oninput=()=>{
+  const i=+speedSlider.value;
+  S.speed=SPEED_STEPS[i]||1;
+  speedVal.textContent=S.speed+'×';
+  applySpeed();
+};
+function applySpeed(){vA.playbackRate=S.speed;vB.playbackRate=S.speed;}
 
 // panel toggles
 ['ctrl','guide','banks'].forEach(id=>{
@@ -669,12 +696,13 @@ function gpPoll(){
 }
 
 // ═══ touch / mouse ═══
+let usedTouch=false;
 function pDown(x,y){S.tx=x;S.ty=y;S.tt=Date.now();}
 function pUp(x,y){const dx=x-S.tx,dy=y-S.ty,ax=Math.abs(dx),ay=Math.abs(dy),dt=Date.now()-S.tt;if(menu.classList.contains('on'))return;if(S.mode==='player'){if(ax<25&&ay<25&&dt<400){if(checkQT()){menuOpen();return;}hudFlash();return;}if(ax>ay&&ax>50){dx>0?prev():next();}else if(ay>ax&&ay>60){dy<0?gridOpen():hudFlash();}}}
-el('player').addEventListener('touchstart',e=>pDown(e.touches[0].clientX,e.touches[0].clientY),{passive:true});
+el('player').addEventListener('touchstart',e=>{usedTouch=true;pDown(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
 el('player').addEventListener('touchend',e=>pUp(e.changedTouches[0].clientX,e.changedTouches[0].clientY),{passive:true});
-el('player').addEventListener('mousedown',e=>pDown(e.clientX,e.clientY));
-el('player').addEventListener('mouseup',e=>pUp(e.clientX,e.clientY));
+el('player').addEventListener('mousedown',e=>{if(usedTouch){usedTouch=false;return;}pDown(e.clientX,e.clientY);});
+el('player').addEventListener('mouseup',e=>{if(usedTouch)return;pUp(e.clientX,e.clientY);});
 let gTy=0;
 el('grid').addEventListener('touchstart',e=>{gTy=e.touches[0].clientY;},{passive:true});
 el('grid').addEventListener('touchend',e=>{if(e.changedTouches[0].clientY-gTy>100){
@@ -683,6 +711,30 @@ el('grid').addEventListener('touchend',e=>{if(e.changedTouches[0].clientY-gTy>10
   if(g&&(g.bi!==S.bank||g.ci!==S.clip)){gridPlay(S.gs);}else{gridClose();}
 }},{passive:true});
 el('grid').addEventListener('dblclick',e=>{if(!e.target.closest('.cell'))gridClose();});
+
+// ═══ pinch to zoom (fit/fill) ═══
+let pinchStart=0;
+el('player').addEventListener('touchstart',e=>{
+  if(e.touches.length===2){
+    const dx=e.touches[0].clientX-e.touches[1].clientX;
+    const dy=e.touches[0].clientY-e.touches[1].clientY;
+    pinchStart=Math.hypot(dx,dy);
+  }
+},{passive:true});
+el('player').addEventListener('touchend',e=>{if(e.touches.length===0)pinchStart=0;},{passive:true});
+el('player').addEventListener('touchmove',e=>{
+  if(e.touches.length===2&&pinchStart>0){
+    const dx=e.touches[0].clientX-e.touches[1].clientX;
+    const dy=e.touches[0].clientY-e.touches[1].clientY;
+    const dist=Math.hypot(dx,dy);
+    const delta=dist-pinchStart;
+    if(Math.abs(delta)>60){
+      const ns=delta>0?'fill':'fit';
+      if(S.scaling!==ns){S.scaling=ns;applyScaling();msg(ns);}
+      pinchStart=dist;
+    }
+  }
+},{passive:true});
 
 // ═══ keyboard ═══
 document.addEventListener('keydown',e=>{
