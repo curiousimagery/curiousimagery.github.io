@@ -122,6 +122,9 @@
   #toast{position:fixed;top:calc(env(safe-area-inset-top,12px)+12px);left:50%;transform:translateX(-50%) translateY(-50px);z-index:999;font-size:0.875rem;letter-spacing:0.08em;color:var(--fg);background:rgba(25,25,25,0.9);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:0.5em 1.3em;border-radius:3px;border:1px solid var(--faint2);transition:transform 0.3s,opacity 0.3s;opacity:0;pointer-events:none;}
   #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
+  /* scrub indicator */
+  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+12px);right:16px;z-index:55;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
+
   /* loading */
   #loading{position:fixed;inset:0;z-index:950;display:none;align-items:center;justify-content:center;background:rgba(10,10,10,0.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
   #loading.on{display:flex;}
@@ -288,6 +291,7 @@
 
 <div id="loading"><div class="ld-text">processing <span class="n" id="ldN">0</span> clips…</div></div>
 <div id="toast"></div>
+<div id="scrubInd"></div>
 <input type="file" id="fi" webkitdirectory multiple accept="video/*,.mp4,.mov,.m4v,.webm">
 
 <script>
@@ -454,8 +458,10 @@ function cBank(){return S.banks[S.bank];}
 function cClip(){const b=cBank();return b?b.clips[S.clip]:null;}
 function vAct(){return S.av==='A'?vA:vB;}
 function vNxt(){return S.av==='A'?vB:vA;}
+function stopRev(){S._revPlay=false;if(S._revRaf){cancelAnimationFrame(S._revRaf);S._revRaf=null;}const si=el('scrubInd');if(si)si.style.opacity='0';}
 
 async function playCur(){
+  stopRev();
   const c=cClip();if(!c)return;
   const v=vAct();v.src=c.url;v.style.opacity='1';v.style.transition='none';
   v.playbackRate=S.speed;
@@ -465,6 +471,7 @@ async function playCur(){
 
 function cancelFade(){
   if(!S.fading)return;
+  stopRev();
   // Cancel any pending luma animation
   if(S.lumaRaf){cancelAnimationFrame(S.lumaRaf);S.lumaRaf=null;}
   // Cancel any pending timeout
@@ -480,6 +487,7 @@ function cancelFade(){
 }
 
 async function xfade(ci,bi){
+  stopRev();
   if(S.fading)cancelFade();
   S.fading=true;
   // Push current clip to history before changing
@@ -731,42 +739,60 @@ function gpPoll(){
   if(S.scrub==='on'&&S.mode==='player'&&!menu.classList.contains('on')){
     const rax=gp.axes[2]||0; // right stick horizontal
     const dead=0.12;
+    const scrubInd=el('scrubInd');
     if(Math.abs(rax)>dead){
       // Map stick position to playback rate
-      // Gentle push (0.12–0.5): 0–1x, Full push (0.5–1.0): 1x–4x
+      // Gentle push (0.12–0.5): 0–1x, Full push (0.5–1.0): 1x–8x
       // Negative = reverse
       const sign=rax>0?1:-1;
       const mag=Math.abs(rax);
       let rate;
       if(mag<0.5)rate=(mag-dead)/(0.5-dead); // 0 to 1
-      else rate=1+((mag-0.5)/0.5)*3; // 1 to 4
-      rate=Math.round(rate*100)/100*sign;
+      else rate=1+((mag-0.5)/0.5)*7; // 1 to 8
+      rate=Math.round(rate*100)/100;
       const v=vAct();
       if(v&&v.src){
         if(sign<0){
           // Reverse: manually step currentTime backward per frame
-          // Safari doesn't support negative playbackRate reliably
           v.pause();
-          v.currentTime=Math.max(0,v.currentTime-(Math.abs(rate)/60));
+          v.currentTime=Math.max(0,v.currentTime-(rate/60));
         } else {
           if(v.paused)v.play().catch(()=>{});
           v.playbackRate=Math.max(0.1,rate);
         }
       }
-      // Show speed in HUD
-      if(!S._scrubHud||Date.now()-S._scrubHud>300){
-        S._scrubHud=Date.now();
-        const display=sign<0?`◀ ${Math.abs(rate).toFixed(1)}×`:`${rate.toFixed(1)}× ▶`;
-        hTitle.textContent=display;
-        hud.classList.add('show');clearTimeout(S.hudT);S.hudT=setTimeout(()=>hud.classList.remove('show'),800);
-      }
-    } else {
-      // Stick centered — resume normal playback
+      S._scrubDir=sign;
+      S._scrubWasActive=true;
+      // Minimal indicator — just rate + arrow, dim, bottom-right corner
+      scrubInd.textContent=sign<0?`◂ ${rate.toFixed(1)}×`:`${rate.toFixed(1)}× ▸`;
+      scrubInd.style.opacity='0.6';
+    } else if(S._scrubWasActive){
+      // Stick released — resume at 1x in the direction they were last scrubbing
       const v=vAct();
-      if(v&&v.src&&v.paused&&S._scrubWasActive){v.play().catch(()=>{});v.playbackRate=S.speed;}
+      if(v&&v.src){
+        if(S._scrubDir<0){
+          // Continue reverse at 1x via frame-stepping
+          // Start a reverse playback loop
+          if(!S._revRaf){
+            const revLoop=()=>{
+              if(S._scrubWasActive||!S._revPlay){S._revRaf=null;return;}
+              v.currentTime=Math.max(0,v.currentTime-(1/60));
+              if(v.currentTime<=0){S._revPlay=false;S._revRaf=null;return;}
+              S._revRaf=requestAnimationFrame(revLoop);
+            };
+            S._revPlay=true;
+            S._revRaf=requestAnimationFrame(revLoop);
+          }
+        } else {
+          if(v.paused)v.play().catch(()=>{});
+          v.playbackRate=S.speed;
+          S._revPlay=false;
+        }
+      }
       S._scrubWasActive=false;
+      // Fade out indicator
+      scrubInd.style.opacity='0';
     }
-    if(Math.abs(gp.axes[2]||0)>dead)S._scrubWasActive=true;
   }
 
   if(menu.classList.contains('on')){if(B||St)menuClose();}
