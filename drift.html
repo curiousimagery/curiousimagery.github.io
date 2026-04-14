@@ -95,6 +95,10 @@
   .m-slider-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--fg);cursor:pointer;}
   .m-slider-val{font-size:0.875rem;color:var(--dim);min-width:2.5em;text-align:right;}
 
+  /* keyboard focus rings (visible only when tabbing, not on click) */
+  .menu-x:focus-visible,.m-item:focus-visible,.m-opt:focus-visible,.m-panel-toggle:focus-visible{outline:1.5px solid var(--fg);outline-offset:2px;border-radius:2px;}
+  .m-slider-row input[type=range]:focus-visible{outline:1.5px solid var(--fg);outline-offset:3px;}
+
   /* controls / guide panels inside menu */
   .m-panel{margin-top:1.5em;padding-top:1em;border-top:1px solid var(--faint);display:none;}
   .m-panel.open{display:block;}
@@ -142,7 +146,7 @@
   </div>
 </div>
 
-<div id="player">
+<div id="player" tabindex="-1">
   <video class="vid over" id="vA" playsinline muted loop preload="auto"></video>
   <video class="vid under" id="vB" playsinline muted loop preload="auto"></video>
   <canvas id="lumaCanvas"></canvas>
@@ -160,7 +164,7 @@
 
 <div id="menu">
   <div class="menu-head">
-    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.2</span></div>
+    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.4</span></div>
     <button class="menu-x" id="mClose">✕</button>
   </div>
   <div class="menu-scroll">
@@ -208,6 +212,17 @@
       </div>
     </div>
 
+    <div class="m-section">
+      <div class="m-section-title">controller</div>
+      <div class="m-row">
+        <span class="m-label">right stick</span>
+        <div class="m-opts">
+          <button class="m-opt on" data-opt="scrub" data-val="off">navigate</button>
+          <button class="m-opt" data-opt="scrub" data-val="on">scrub speed</button>
+        </div>
+      </div>
+    </div>
+
     <button class="m-panel-toggle" id="ctrlToggle">controls reference</button>
     <div class="m-panel" id="ctrlPanel">
       <div class="ctrl-group">
@@ -239,6 +254,7 @@
         <div class="ctrl-row"><span class="ctrl-k">b (grid)</span><span class="ctrl-v">toggle focus: clips ↔ banks</span></div>
         <div class="ctrl-row"><span class="ctrl-k">start</span><span class="ctrl-v">close grid</span></div>
         <div class="ctrl-row"><span class="ctrl-k">l / r shoulder</span><span class="ctrl-v">switch bank</span></div>
+        <div class="ctrl-row"><span class="ctrl-k">right stick ←→</span><span class="ctrl-v">scrub speed / direction (when enabled)</span></div>
       </div>
     </div>
 
@@ -263,6 +279,10 @@
       <div class="guide-step"><div class="guide-num">switching banks</div><div class="guide-text">keyboard: press b. bluetooth controller: press l or r shoulder button. in the grid view, bank tabs appear at the top when multiple banks exist.</div></div>
     </div>
 
+    <div style="margin-top:2.5em;padding-top:1.2em;border-top:1px solid var(--faint2);text-align:center;">
+      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.4 · support on ko-fi ↗</a>
+    </div>
+
   </div>
 </div>
 
@@ -279,7 +299,7 @@ const S={
   gb:0,gs:0,gTap:-1,gTapT:0,gClips:[],gFocus:'clips',gBankSel:0,
   gp:{},gpAx:[0,0],gpR:null,
   tx:0,ty:0,tt:0,
-  order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',speed:1,
+  order:'sequential',transition:'crossfade',fadeMs:2200,scaling:'fit',speed:1,scrub:'off',
   history:[],fadeTimer:null,scope:'bank',
   qtTaps:[],qtW:900,
   lumaGL:null,lumaActive:false,lumaRaf:null,
@@ -321,7 +341,8 @@ function mkThumb(file){
       const c=document.createElement('canvas');c.width=320;c.height=180;
       c.getContext('2d').fillStyle='#151515';c.getContext('2d').fillRect(0,0,320,180);
       v.pause();v.removeAttribute('src');v.load();
-      resolve({thumb:c,url,dur:0});
+      URL.revokeObjectURL(url);
+      resolve({thumb:c,url:null,dur:0,skipped:true});
     }
     // Strategy: play the video to force iOS to decode a frame, then grab it.
     // No seeking — iOS PWA standalone mode blocks seeks on background videos.
@@ -411,14 +432,17 @@ addBtn.onclick=()=>{
     loading.classList.add('on');ldN.textContent='0';
     const grouped={};
     files.forEach(f=>{const t=tag(f.name)||'_default';if(!grouped[t])grouped[t]=[];grouped[t].push(f);});
+    let skipped=0;
     for(const t of Object.keys(grouped)){
       const g=grouped[t];g.sort((a,b)=>a.name.localeCompare(b.name));
       const bankName=t==='_default'?'main':t;
       let bi=S.banks.findIndex(b=>b&&b.name===bankName);
       if(bi===-1){bi=S.banks.length;if(bi>=MAXBANK)bi=0;if(!S.banks[bi])S.banks[bi]={name:bankName,clips:[]};}
-      for(let i=0;i<g.length;i++){ldN.textContent=`${totalClips()+i+1}`;const r=await mkThumb(g[i]);S.banks[bi].clips.push({file:g[i],name:clean(g[i].name),...r});}
+      for(let i=0;i<g.length;i++){ldN.textContent=`${totalClips()+i+1}`;const r=await mkThumb(g[i]);if(r.skipped){skipped++;continue;}S.banks[bi].clips.push({file:g[i],name:clean(g[i].name),...r});}
     }
-    loading.classList.remove('on');updateSetup();msg(`${files.length} clips added`);
+    loading.classList.remove('on');updateSetup();
+    const added=files.length-skipped;
+    msg(skipped?`${added} clips added · ${skipped} skipped (unsupported format)`:`${added} clips added`);
   };
   fi.click();
 };
@@ -646,8 +670,12 @@ function gridHighlightBank(){
 }
 
 // ═══ menu ═══
-function menuOpen(){menu.classList.add('on');menu.querySelectorAll('.m-opt').forEach(o=>o.classList.toggle('on',S[o.dataset.opt]===o.dataset.val));const n=totalClips();el('mClipCount').textContent=n?`· ${n} clip${n!==1?'s':''}`:'';}
-function menuClose(){menu.classList.remove('on');}
+function menuOpen(){menu.classList.add('on');menu.querySelectorAll('.m-opt').forEach(o=>o.classList.toggle('on',S[o.dataset.opt]===o.dataset.val));const n=totalClips();el('mClipCount').textContent=n?`· ${n} clip${n!==1?'s':''}`:'';
+  // Focus first interactive element for keyboard navigation
+  requestAnimationFrame(()=>{const first=menu.querySelector('button.m-item,button.m-opt,input');if(first)first.focus();});}
+function menuClose(){menu.classList.remove('on');
+  // Return focus to player
+  el('player').focus();}
 el('mClose').onclick=menuClose;
 el('mAdd').onclick=()=>{menuClose();S.mode='setup';el('setup').classList.add('on');el('player').classList.remove('on');updateSetup();};
 el('mClear').onclick=()=>{S.banks.forEach(b=>{if(b)b.clips.forEach(c=>URL.revokeObjectURL(c.url));});S.banks=[];menuClose();el('player').classList.remove('on');el('grid').classList.remove('on');vA.pause();vA.removeAttribute('src');vA.load();vB.pause();vB.removeAttribute('src');vB.load();S.mode='setup';el('setup').classList.add('on');updateSetup();msg('all clips cleared');};
@@ -698,6 +726,49 @@ window.addEventListener('gamepaddisconnected',()=>msg('controller disconnected')
 function gpPoll(){
   const gp=navigator.getGamepads()[0];
   if(gp){const p={};gp.buttons.forEach((b,i)=>p[i]=b.pressed);const jp=i=>p[i]&&!S.gp[i];const ax=[gp.axes[0]||0,gp.axes[1]||0];const T=0.5;const al=ax[0]<-T&&S.gpAx[0]>=-T,ar=ax[0]>T&&S.gpAx[0]<=T,au=ax[1]<-T&&S.gpAx[1]>=-T,ad=ax[1]>T&&S.gpAx[1]<=T;const A=jp(0),B=jp(1),LB=jp(4),RB=jp(5),St=jp(9);const DL=jp(14)||al,DR=jp(15)||ar,DU=jp(12)||au,DD=jp(13)||ad;
+
+  // ─── right stick scrub ───
+  if(S.scrub==='on'&&S.mode==='player'&&!menu.classList.contains('on')){
+    const rax=gp.axes[2]||0; // right stick horizontal
+    const dead=0.12;
+    if(Math.abs(rax)>dead){
+      // Map stick position to playback rate
+      // Gentle push (0.12–0.5): 0–1x, Full push (0.5–1.0): 1x–4x
+      // Negative = reverse
+      const sign=rax>0?1:-1;
+      const mag=Math.abs(rax);
+      let rate;
+      if(mag<0.5)rate=(mag-dead)/(0.5-dead); // 0 to 1
+      else rate=1+((mag-0.5)/0.5)*3; // 1 to 4
+      rate=Math.round(rate*100)/100*sign;
+      const v=vAct();
+      if(v&&v.src){
+        if(sign<0){
+          // Reverse: manually step currentTime backward per frame
+          // Safari doesn't support negative playbackRate reliably
+          v.pause();
+          v.currentTime=Math.max(0,v.currentTime-(Math.abs(rate)/60));
+        } else {
+          if(v.paused)v.play().catch(()=>{});
+          v.playbackRate=Math.max(0.1,rate);
+        }
+      }
+      // Show speed in HUD
+      if(!S._scrubHud||Date.now()-S._scrubHud>300){
+        S._scrubHud=Date.now();
+        const display=sign<0?`◀ ${Math.abs(rate).toFixed(1)}×`:`${rate.toFixed(1)}× ▶`;
+        hTitle.textContent=display;
+        hud.classList.add('show');clearTimeout(S.hudT);S.hudT=setTimeout(()=>hud.classList.remove('show'),800);
+      }
+    } else {
+      // Stick centered — resume normal playback
+      const v=vAct();
+      if(v&&v.src&&v.paused&&S._scrubWasActive){v.play().catch(()=>{});v.playbackRate=S.speed;}
+      S._scrubWasActive=false;
+    }
+    if(Math.abs(gp.axes[2]||0)>dead)S._scrubWasActive=true;
+  }
+
   if(menu.classList.contains('on')){if(B||St)menuClose();}
   else if(S.mode==='player'){
     if(DL)prev();if(DR)next();if(B)gridOpen();if(St)gridOpen();if(LB||RB)bSwitch();
