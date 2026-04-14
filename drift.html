@@ -123,7 +123,7 @@
   #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
   /* scrub indicator */
-  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+20px);right:calc(env(safe-area-inset-right,0px)+24px);z-index:150;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
+  #scrubInd{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:150;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
 
   /* loading */
   #loading{position:fixed;inset:0;z-index:950;display:none;align-items:center;justify-content:center;background:rgba(10,10,10,0.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
@@ -167,7 +167,7 @@
 
 <div id="menu">
   <div class="menu-head">
-    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.5</span></div>
+    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.6</span></div>
     <button class="menu-x" id="mClose">✕</button>
   </div>
   <div class="menu-scroll">
@@ -283,7 +283,7 @@
     </div>
 
     <div style="margin-top:2.5em;padding-top:1.2em;border-top:1px solid var(--faint2);text-align:center;">
-      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.5 · support on ko-fi ↗</a>
+      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.6 · support on ko-fi ↗</a>
     </div>
 
   </div>
@@ -335,7 +335,15 @@ function mkThumb(file){
       const c=document.createElement('canvas');
       const vw=v.videoWidth||320,vh=v.videoHeight||180;
       c.width=320;c.height=Math.round(320*vh/vw)||180;
-      try{c.getContext('2d').drawImage(v,0,0,c.width,c.height);}catch(e){}
+      const ctx=c.getContext('2d');
+      try{ctx.drawImage(v,0,0,c.width,c.height);}catch(e){fail();return;}
+      // Verify pixels were actually decoded — check a small sample for any non-zero data
+      try{
+        const sample=ctx.getImageData(0,0,Math.min(c.width,40),Math.min(c.height,30)).data;
+        let hasPixels=false;
+        for(let i=0;i<sample.length;i+=16){if(sample[i]>2||sample[i+1]>2||sample[i+2]>2){hasPixels=true;break;}}
+        if(!hasPixels){fail();return;}
+      }catch(e){}
       const dur=v.duration||0;
       v.pause();v.removeAttribute('src');v.load();
       resolve({thumb:c,url,dur});
@@ -446,7 +454,8 @@ addBtn.onclick=()=>{
     }
     loading.classList.remove('on');updateSetup();
     const added=files.length-skipped;
-    msg(skipped?`${added} clips added · ${skipped} skipped (unsupported format)`:`${added} clips added`);
+    if(skipped){msg(`${added} clips added · ${skipped} skipped (unsupported format)`);clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),4000);}
+    else msg(`${added} clips added`);
   };
   fi.click();
 };
@@ -748,7 +757,7 @@ function gpPoll(){
       const sign=rax>0?1:-1;
       let rate;
       if(mag<0.5)rate=(mag-dead)/(0.5-dead); // 0 to 1
-      else rate=1+((mag-0.5)/0.5)*7; // 1 to 8
+      else rate=1+((mag-0.5)/0.5)*15; // 1 to 16
       rate=Math.round(rate*100)/100;
 
       const v=vAct();
