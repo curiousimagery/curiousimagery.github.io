@@ -123,7 +123,7 @@
   #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
   /* scrub indicator */
-  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+12px);right:16px;z-index:55;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
+  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+12px);right:16px;z-index:150;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
 
   /* loading */
   #loading{position:fixed;inset:0;z-index:950;display:none;align-items:center;justify-content:center;background:rgba(10,10,10,0.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
@@ -740,58 +740,62 @@ function gpPoll(){
     const rax=gp.axes[2]||0; // right stick horizontal
     const dead=0.12;
     const scrubInd=el('scrubInd');
-    if(Math.abs(rax)>dead){
-      // Map stick position to playback rate
-      // Gentle push (0.12–0.5): 0–1x, Full push (0.5–1.0): 1x–8x
-      // Negative = reverse
+    const mag=Math.abs(rax);
+
+    if(mag>dead){
+      // Active scrubbing — always pause the native player and step manually
+      // This unifies forward and reverse into one mechanism, no glitches on zero-crossing
       const sign=rax>0?1:-1;
-      const mag=Math.abs(rax);
       let rate;
       if(mag<0.5)rate=(mag-dead)/(0.5-dead); // 0 to 1
       else rate=1+((mag-0.5)/0.5)*7; // 1 to 8
       rate=Math.round(rate*100)/100;
+
       const v=vAct();
       if(v&&v.src){
-        if(sign<0){
-          // Reverse: manually step currentTime backward per frame
-          v.pause();
-          v.currentTime=Math.max(0,v.currentTime-(rate/60));
-        } else {
-          if(v.paused)v.play().catch(()=>{});
-          v.playbackRate=Math.max(0.1,rate);
-        }
+        if(!v.paused)v.pause();
+        const step=(rate/60)*sign;
+        const nt=v.currentTime+step;
+        // Clamp to valid range, wrap at boundaries
+        if(nt<0)v.currentTime=0;
+        else if(v.duration&&nt>v.duration)v.currentTime=v.duration;
+        else v.currentTime=nt;
       }
+
       S._scrubDir=sign;
       S._scrubWasActive=true;
-      // Minimal indicator — just rate + arrow, dim, bottom-right corner
+      // Cancel any lingering reverse-coast loop
+      S._revPlay=false;if(S._revRaf){cancelAnimationFrame(S._revRaf);S._revRaf=null;}
+
+      // Minimal indicator
       scrubInd.textContent=sign<0?`◂ ${rate.toFixed(1)}×`:`${rate.toFixed(1)}× ▸`;
       scrubInd.style.opacity='0.6';
+
     } else if(S._scrubWasActive){
-      // Stick released — resume at 1x in the direction they were last scrubbing
+      // Stick released — resume at 1x in the last scrub direction
+      S._scrubWasActive=false;
+      scrubInd.style.opacity='0';
       const v=vAct();
       if(v&&v.src){
         if(S._scrubDir<0){
-          // Continue reverse at 1x via frame-stepping
-          // Start a reverse playback loop
+          // Coast reverse at 1x via frame-stepping
           if(!S._revRaf){
+            S._revPlay=true;
             const revLoop=()=>{
-              if(S._scrubWasActive||!S._revPlay){S._revRaf=null;return;}
+              if(!S._revPlay){S._revRaf=null;return;}
               v.currentTime=Math.max(0,v.currentTime-(1/60));
               if(v.currentTime<=0){S._revPlay=false;S._revRaf=null;return;}
               S._revRaf=requestAnimationFrame(revLoop);
             };
-            S._revPlay=true;
             S._revRaf=requestAnimationFrame(revLoop);
           }
         } else {
-          if(v.paused)v.play().catch(()=>{});
-          v.playbackRate=S.speed;
+          // Resume forward at normal speed
           S._revPlay=false;
+          v.playbackRate=S.speed;
+          v.play().catch(()=>{});
         }
       }
-      S._scrubWasActive=false;
-      // Fade out indicator
-      scrubInd.style.opacity='0';
     }
   }
 
@@ -901,8 +905,18 @@ document.addEventListener('keydown',e=>{
 });
 
 // ═══ wake lock ═══
-async function wl(){try{if('wakeLock' in navigator)await navigator.wakeLock.request('screen');}catch(e){}}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wl();});wl();
+let _wlSentinel=null;
+async function wl(){
+  try{
+    if(!('wakeLock' in navigator))return;
+    _wlSentinel=await navigator.wakeLock.request('screen');
+    _wlSentinel.addEventListener('release',()=>{_wlSentinel=null;wl();});
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wl();});
+// Re-request periodically as iOS can silently drop the lock
+setInterval(()=>{if(!_wlSentinel&&document.visibilityState==='visible')wl();},30000);
+wl();
 </script>
 </body>
 </html>
