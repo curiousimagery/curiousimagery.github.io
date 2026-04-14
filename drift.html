@@ -123,7 +123,7 @@
   #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
   /* scrub indicator */
-  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+12px);right:16px;z-index:150;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
+  #scrubInd{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px)+20px);right:calc(env(safe-area-inset-right,0px)+24px);z-index:150;font-size:0.75rem;letter-spacing:0.08em;color:var(--dim);opacity:0;transition:opacity 0.2s;pointer-events:none;font-variant-numeric:tabular-nums;}
 
   /* loading */
   #loading{position:fixed;inset:0;z-index:950;display:none;align-items:center;justify-content:center;background:rgba(10,10,10,0.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
@@ -167,7 +167,7 @@
 
 <div id="menu">
   <div class="menu-head">
-    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.4</span></div>
+    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.5</span></div>
     <button class="menu-x" id="mClose">✕</button>
   </div>
   <div class="menu-scroll">
@@ -283,7 +283,7 @@
     </div>
 
     <div style="margin-top:2.5em;padding-top:1.2em;border-top:1px solid var(--faint2);text-align:center;">
-      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.4 · support on ko-fi ↗</a>
+      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.5 · support on ko-fi ↗</a>
     </div>
 
   </div>
@@ -755,11 +755,12 @@ function gpPoll(){
       if(v&&v.src){
         if(!v.paused)v.pause();
         const step=(rate/60)*sign;
-        const nt=v.currentTime+step;
-        // Clamp to valid range, wrap at boundaries
-        if(nt<0)v.currentTime=0;
-        else if(v.duration&&nt>v.duration)v.currentTime=v.duration;
-        else v.currentTime=nt;
+        let nt=v.currentTime+step;
+        // Wrap at boundaries for seamless looping
+        const dur=v.duration||1;
+        if(nt<0)nt=dur+nt; // wrap to end
+        else if(nt>dur)nt=nt-dur; // wrap to start
+        v.currentTime=Math.max(0,Math.min(dur,nt));
       }
 
       S._scrubDir=sign;
@@ -778,19 +779,21 @@ function gpPoll(){
       const v=vAct();
       if(v&&v.src){
         if(S._scrubDir<0){
-          // Coast reverse at 1x via frame-stepping
+          // Coast reverse at 1x via frame-stepping, wrapping at boundaries
           if(!S._revRaf){
             S._revPlay=true;
             const revLoop=()=>{
               if(!S._revPlay){S._revRaf=null;return;}
-              v.currentTime=Math.max(0,v.currentTime-(1/60));
-              if(v.currentTime<=0){S._revPlay=false;S._revRaf=null;return;}
+              let nt=v.currentTime-(1/60);
+              const dur=v.duration||1;
+              if(nt<0)nt=dur+nt;
+              v.currentTime=Math.max(0,nt);
               S._revRaf=requestAnimationFrame(revLoop);
             };
             S._revRaf=requestAnimationFrame(revLoop);
           }
         } else {
-          // Resume forward at normal speed
+          // Resume forward at normal speed (native loop handles wrapping)
           S._revPlay=false;
           v.playbackRate=S.speed;
           v.play().catch(()=>{});
