@@ -18,17 +18,15 @@
   html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font-family:'DM Sans',sans-serif;font-weight:300;-webkit-user-select:none;user-select:none;}
 
   /* splash */
-  #splash{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);cursor:pointer;transition:opacity 0.8s,visibility 0.8s;}
+  #splash{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);transition:opacity 0.8s,visibility 0.8s;}
   #splash.out{opacity:0;visibility:hidden;pointer-events:none;}
-  .s-cta{font-size:1.3rem;font-weight:300;letter-spacing:0.25em;color:#fff;opacity:0;animation:up 0.8s ease 0.2s forwards;cursor:pointer;border:none;background:none;font-family:inherit;padding:0.5em 0.8em;transition:opacity 0.2s;}
-  .s-cta:hover,.s-cta:active{opacity:0.6;}
+  .s-cta{font-size:1.3rem;font-weight:300;letter-spacing:0.25em;color:#fff;opacity:0;animation:up 0.8s ease 0.2s forwards;border:none;background:none;font-family:inherit;padding:0.5em 0.8em;pointer-events:none;}
   .s-sub{font-size:0.875rem;letter-spacing:0.15em;color:var(--dim);opacity:0;animation:up 0.8s ease 0.6s forwards;margin-top:0.7em;}
+  #splash .setup-actions{opacity:0;animation:up 0.8s ease 1.0s forwards;}
   @keyframes up{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 
-  /* setup */
-  #setup{position:fixed;inset:0;z-index:900;display:none;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);padding:2em;transition:opacity 0.5s;}
-  #setup.on{display:flex;}
-  .setup-status{font-size:0.875rem;letter-spacing:0.08em;color:var(--dim);margin-bottom:1.8em;min-height:1.2em;}
+  /* setup (integrated into splash) */
+  .setup-status{font-size:0.875rem;letter-spacing:0.08em;color:var(--dim);margin-bottom:0.6em;min-height:1.2em;}
   .setup-actions{display:flex;flex-direction:column;gap:0.8em;align-items:center;width:100%;max-width:280px;}
   .big-btn{width:100%;font-size:0.85rem;font-weight:300;letter-spacing:0.15em;padding:1em 1.5em;border-radius:2px;cursor:pointer;font-family:inherit;transition:background 0.2s,border-color 0.2s,opacity 0.2s,color 0.2s;}
   .btn-ghost{color:var(--fg);background:none;border:none;transition:opacity 0.2s;}
@@ -137,13 +135,10 @@
 <body>
 
 <div id="splash">
-  <button class="s-cta" id="splashBtn">let's play</button>
-  <div class="s-sub">tap to begin</div>
-</div>
-
-<div id="setup">
-  <div class="setup-status" id="setupStatus"></div>
-  <div class="setup-actions">
+  <div class="s-cta">let's play</div>
+  <div class="s-sub" id="splashSub">add media to begin</div>
+  <div class="setup-actions" style="margin-top:1.6em;">
+    <div class="setup-status" id="setupStatus"></div>
     <button class="big-btn btn-ghost" id="addBtn">add media</button>
     <button class="big-btn btn-solid btn-hidden" id="goBtn">launch</button>
   </div>
@@ -167,7 +162,7 @@
 
 <div id="menu">
   <div class="menu-head">
-    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.0.6</span></div>
+    <div class="menu-title">settings <span id="mVer" style="opacity:0.5;">v1.1.0</span></div>
     <button class="menu-x" id="mClose">✕</button>
   </div>
   <div class="menu-scroll">
@@ -283,7 +278,7 @@
     </div>
 
     <div style="margin-top:2.5em;padding-top:1.2em;border-top:1px solid var(--faint2);text-align:center;">
-      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.0.6 · support on ko-fi ↗</a>
+      <a href="https://ko-fi.com/curiousimagery" target="_blank" rel="noopener" style="font-size:0.8125rem;letter-spacing:0.06em;color:var(--dim);text-decoration:none;transition:color 0.2s;">drift v1.1.0 · support on ko-fi ↗</a>
     </div>
 
   </div>
@@ -417,26 +412,26 @@ function lumaRender(from,to,mix){
 }
 
 // ═══ splash ═══
-function init(e){
-  if(e){e.preventDefault();e.stopPropagation();}
-  if(S.mode!=='splash')return;
-  S.mode='setup';
+let _primed=false;
+function prime(){
+  if(_primed)return;_primed=true;
   vA.muted=true;vB.muted=true;
   [vA,vB].forEach(v=>{v.src='data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0AAAA1m1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU4Ljc2LjEwMA==';v.play().then(()=>v.pause()).catch(()=>{});});
-  el('splash').classList.add('out');
-  el('setup').classList.add('on');
-  updateSetup();
   initLuma();
 }
-// Use touchend on iOS for immediate response (no 300ms click delay).
-// Only bind to the parent splash div to avoid double-fire from button + parent.
-el('splash').addEventListener('touchend',init,{passive:false});
-el('splash').addEventListener('click',init);
 
 // ═══ setup ═══
-function updateSetup(){const n=totalClips();setupStatus.textContent=n?`${n} clip${n!==1?'s':''} loaded`:'';goBtn.classList.toggle('btn-hidden',!n);}
+function updateSetup(){
+  const n=totalClips();
+  setupStatus.textContent=n?`${n} clip${n!==1?'s':''} loaded`:'';
+  goBtn.classList.toggle('btn-hidden',!n);
+  // Hide subtitle once clips are loaded
+  const sub=el('splashSub');
+  if(sub)sub.style.display=n?'none':'block';
+}
 
 addBtn.onclick=()=>{
+  prime(); // Ensure video context is primed on first tap
   fi.value='';
   fi.onchange=async(e)=>{
     let files=Array.from(e.target.files).filter(isV);
@@ -459,7 +454,7 @@ addBtn.onclick=()=>{
   };
   fi.click();
 };
-goBtn.onclick=()=>{if(!totalClips())return;el('setup').classList.remove('on');go();};
+goBtn.onclick=()=>{if(!totalClips())return;el('splash').classList.add('out');go();};
 
 // ═══ player ═══
 function go(){S.mode='player';el('player').classList.add('on');S.bank=S.banks.findIndex(b=>b&&b.clips.length);S.clip=0;S.scope=multiBank()?'all':'bank';playCur();autoStart();}
@@ -694,8 +689,8 @@ function menuClose(){menu.classList.remove('on');
   // Return focus to player
   el('player').focus();}
 el('mClose').onclick=menuClose;
-el('mAdd').onclick=()=>{menuClose();S.mode='setup';el('setup').classList.add('on');el('player').classList.remove('on');updateSetup();};
-el('mClear').onclick=()=>{S.banks.forEach(b=>{if(b)b.clips.forEach(c=>URL.revokeObjectURL(c.url));});S.banks=[];menuClose();el('player').classList.remove('on');el('grid').classList.remove('on');vA.pause();vA.removeAttribute('src');vA.load();vB.pause();vB.removeAttribute('src');vB.load();S.mode='setup';el('setup').classList.add('on');updateSetup();msg('all clips cleared');};
+el('mAdd').onclick=()=>{menuClose();S.mode='splash';el('splash').classList.remove('out');el('player').classList.remove('on');updateSetup();};
+el('mClear').onclick=()=>{S.banks.forEach(b=>{if(b)b.clips.forEach(c=>URL.revokeObjectURL(c.url));});S.banks=[];menuClose();el('player').classList.remove('on');el('grid').classList.remove('on');vA.pause();vA.removeAttribute('src');vA.load();vB.pause();vB.removeAttribute('src');vB.load();S.mode='splash';el('splash').classList.remove('out');updateSetup();msg('all clips cleared');};
 menu.querySelectorAll('.m-opt').forEach(o=>{o.onclick=()=>{S[o.dataset.opt]=o.dataset.val;o.closest('.m-opts').querySelectorAll('.m-opt').forEach(s=>s.classList.toggle('on',s.dataset.val===o.dataset.val));if(o.dataset.opt==='scaling')applyScaling();};});
 function applyScaling(){const v=S.scaling==='fill'?'cover':'contain';vA.style.objectFit=v;vB.style.objectFit=v;vA.style.objectPosition='center';vB.style.objectPosition='center';lumaC.style.objectFit=v;}
 
